@@ -1,5 +1,9 @@
 # Architecture
 
+<p align="center">
+  <img src="images/architecture.png" alt="MindBank Architecture" width="700" />
+</p>
+
 ## System Overview
 
 ```

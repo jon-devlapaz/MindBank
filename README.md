@@ -19,6 +19,23 @@ MindBank gives your AI assistant a permanent, searchable, relationship-aware mem
        └──relates_to──→ [PostgreSQL config] ←──depends_on── [Redis cache]
 ```
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/images/dashboard.png" alt="MindBank Dashboard" width="800" />
+  <br/><em>Dashboard — statistics, namespace breakdown, memory browser, search</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/graph-3d.png" alt="3D Neural Graph" width="800" />
+  <br/><em>3D Neural Graph — interactive force-directed visualization of memory connections</em>
+</p>
+
+<p align="center">
+  <img src="docs/images/about.png" alt="MindBank About Page" width="800" />
+  <br/><em>About page — product overview, competitive analysis, performance metrics</em>
+</p>
+
 ## Why MindBank?
 
 | Problem | Without MindBank | With MindBank |
@@ -46,6 +63,8 @@ curl http://localhost:8095/api/v1/health
 ```
 
 Dashboard at http://localhost:8095.
+
+**Having issues?** See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ## Install for Hermes Agent
 
@@ -371,6 +390,26 @@ MB_DB_DSN="..." ./mindbank
 | MCP support | Yes | Yes | No | No |
 | Web dashboard | Yes | No | No | No |
 | Open source | Yes | Partial | No | No |
+
+## FAQ
+
+**Does MindBank require Ollama?**
+No. The API works without Ollama — full-text search and all CRUD operations work. You only lose hybrid/semantic search (the AI-powered search). Set `MB_OLLAMA_URL=` to disable.
+
+**Does it work with Claude / ChatGPT / my custom agent?**
+Yes. Any agent that can make HTTP calls or use MCP can use MindBank. The MCP server works with any MCP-compatible agent. The REST API works with anything.
+
+**Can I use it without Hermes?**
+Absolutely. MindBank is a standalone API. Hermes is one integration, but any tool can use the REST API or MCP server.
+
+**How much data can it handle?**
+Tested with 200 nodes and 1800+ edges. PostgreSQL can handle millions of rows — the bottleneck is Ollama embedding speed (~120ms per text).
+
+**Is my data sent anywhere?**
+No. Everything runs locally: API on your machine, PostgreSQL in Docker, Ollama for embeddings. Nothing leaves your machine.
+
+**Can I run it without Docker?**
+Yes, for the API. You still need PostgreSQL with pgvector — Docker is the easiest way to get that. You could install pgvector natively and point `MB_DB_DSN` to your local Postgres.
 
 ## Contributing
 
