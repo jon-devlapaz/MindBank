@@ -39,12 +39,34 @@ func (r *EdgeRepo) Create(ctx context.Context, req models.EdgeCreate) (*models.E
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO edges (workspace_name, source_id, target_id, edge_type, weight, metadata)
 		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT (source_id, target_id, edge_type) DO NOTHING
 		RETURNING id, workspace_name, source_id, target_id, edge_type, weight, metadata, created_at
 	`, ws, req.SourceID, req.TargetID, req.EdgeType, w, meta,
 	).Scan(&e.ID, &e.WorkspaceName, &e.SourceID, &e.TargetID,
 		&e.EdgeType, &e.Weight, &e.Metadata, &e.CreatedAt)
 	if err != nil {
+		if err == pgx.ErrNoRows {
+			// Edge already exists — fetch and return it
+			return r.GetByTriple(ctx, req.SourceID, req.TargetID, req.EdgeType)
+		}
 		return nil, fmt.Errorf("insert edge: %w", err)
+	}
+	return e, nil
+}
+
+// GetByTriple returns an existing edge by source, target, and type.
+func (r *EdgeRepo) GetByTriple(ctx context.Context, sourceID, targetID string, edgeType models.EdgeType) (*models.Edge, error) {
+	e := &models.Edge{}
+	err := r.pool.QueryRow(ctx, `
+		SELECT id, workspace_name, source_id, target_id, edge_type, weight, metadata, created_at
+		FROM edges
+		WHERE source_id = $1 AND target_id = $2 AND edge_type = $3
+		LIMIT 1
+	`, sourceID, targetID, edgeType,
+	).Scan(&e.ID, &e.WorkspaceName, &e.SourceID, &e.TargetID,
+		&e.EdgeType, &e.Weight, &e.Metadata, &e.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("get edge by triple: %w", err)
 	}
 	return e, nil
 }

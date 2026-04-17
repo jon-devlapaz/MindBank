@@ -213,9 +213,14 @@ func (r *SearchRepo) HybridSearch(ctx context.Context, query string, embedding [
 		vecResults = nil
 	}
 
-	// If both failed, return empty
+	// If both failed, try trigram fallback before giving up
 	if ftsResults == nil && vecResults == nil {
-		return nil, fmt.Errorf("both fts and vector search failed")
+		slog.Warn("both fts and vector failed, trying trigram fallback")
+		trigramResults, err := r.trigramSearch(ctx, query, workspace, namespace, limit)
+		if err == nil && len(trigramResults) > 0 {
+			return trigramResults, nil
+		}
+		return nil, fmt.Errorf("all search methods failed")
 	}
 
 	// RRF fusion: score = sum(1 / (k + rank_i)) where k=60
