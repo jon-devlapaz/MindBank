@@ -29,7 +29,7 @@ Request:
   "node_type": "decision",
   "content": "JWT with access + refresh tokens",
   "summary": "Short description (optional)",
-  "namespace": "klixsor",
+  "namespace": "my-project",
   "importance": 0.8
 }
 ```
@@ -82,7 +82,7 @@ Soft-delete: sets `valid_to` to now. Node is preserved for temporal queries. Con
 ### List Nodes
 
 ```
-GET /api/v1/nodes?namespace=klixsor&type=decision&limit=50&offset=0
+GET /api/v1/nodes?namespace=my-project&type=decision&limit=50&offset=0
 ```
 
 | Param | Type | Description |
@@ -116,7 +116,7 @@ POST /api/v1/nodes/auto-connect
 ```
 
 ```json
-{"namespace": "klixsor"}
+{"namespace": "my-project"}
 ```
 
 Creates semantic edges between related nodes based on type-matching rules. Returns count of edges created.
@@ -124,7 +124,7 @@ Creates semantic edges between related nodes based on type-matching rules. Retur
 ### Dedup
 
 ```
-POST /api/v1/nodes/dedup?namespace=klixsor&dry_run=true
+POST /api/v1/nodes/dedup?namespace=my-project&dry_run=true
 ```
 
 Finds duplicate nodes (same label + type + namespace) and soft-deletes older versions.
@@ -189,7 +189,7 @@ Max 200 edges per batch.
 ### Full-Text Search
 
 ```
-GET /api/v1/search?q=jwt+auth&namespace=klixsor&limit=10
+GET /api/v1/search?q=jwt+auth&namespace=my-project&limit=10
 ```
 
 PostgreSQL full-text search with synonym expansion and trigram fallback.
@@ -203,7 +203,7 @@ POST /api/v1/search/hybrid
 ```json
 {
   "query": "how do we handle authentication",
-  "namespace": "klixsor",
+  "namespace": "my-project",
   "limit": 10
 }
 ```
@@ -219,7 +219,7 @@ POST /api/v1/search/semantic
 ```json
 {
   "query": "database configuration",
-  "namespace": "klixsor",
+  "namespace": "my-project",
   "limit": 10
 }
 ```
@@ -235,7 +235,7 @@ POST /api/v1/ask
 ```json
 {
   "query": "what database are we using?",
-  "namespace": "klixsor",
+  "namespace": "my-project",
   "max_tokens": 500
 }
 ```
@@ -245,7 +245,7 @@ Natural language Q&A. Returns relevant nodes and graph paths formatted as contex
 ## Snapshot
 
 ```
-GET /api/v1/snapshot?namespace=klixsor
+GET /api/v1/snapshot?namespace=my-project
 ```
 
 Pre-computed context of the most important memories. Use this at session start to load relevant context. Results are importance-scored and deduplicated.
@@ -253,7 +253,7 @@ Pre-computed context of the most important memories. Use this at session start t
 ## Graph
 
 ```
-GET /api/v1/graph?namespace=klixsor
+GET /api/v1/graph?namespace=my-project
 ```
 
 Returns all current nodes and edges. Used by the web dashboard.
@@ -261,7 +261,7 @@ Returns all current nodes and edges. Used by the web dashboard.
 ## Export / Import
 
 ```
-GET /api/v1/export?namespace=klixsor
+GET /api/v1/export?namespace=my-project
 POST /api/v1/import
 ```
 

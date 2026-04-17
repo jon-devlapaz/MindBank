@@ -5,7 +5,7 @@ Thanks for your interest in contributing to MindBank!
 ## Getting Started
 
 1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/mindbank.git`
+2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/MindBank.git`
 3. Copy config: `cp .env.example .env`
 4. Start services: `make run`
 5. Verify: `make health`

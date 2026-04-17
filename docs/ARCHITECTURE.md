@@ -54,7 +54,7 @@
 **Nodes table:**
 - `id` — UUID primary key
 - `workspace_name` — logical workspace (multi-tenant)
-- `namespace` — project namespace (klixsor, mindbank, etc.)
+- `namespace` — project namespace (my-project, my-app, etc.)
 - `label` — short name
 - `node_type` — one of 12 types (PostgreSQL ENUM)
 - `content` — full text (up to 50KB)
@@ -141,7 +141,7 @@ Each project gets its own namespace. Memories from one project don't leak into a
 
 Detection: uses the current working directory name. Custom mappings via `~/.hermes/mindbank-namespaces.json`:
 ```json
-{"kataro": "klixsor", "ultraclaude": "autowrkers"}
+{"my-project-dir": "my-project", "my-api": "api-server"}
 ```
 
 All API calls accept an optional `namespace` parameter. Empty string = all namespaces.
