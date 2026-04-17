@@ -1,64 +1,66 @@
-.PHONY: build run stop db-up db-down db-status logs tidy vet clean help
+.PHONY: build run stop db-up db-down db-status logs tidy vet clean
 
-# === MindBank ===
+# === MindBank Commands ===
 
-help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
-
-build: ## Build the binary
+# Build the binary
+build:
 	go build -o mindbank ./cmd/mindbank
 
-run: build db-up ## Start everything (Postgres + API)
+# Start everything (Postgres + API)
+run: build db-up
 	@echo "Starting MindBank API..."
 	@pkill -f "./mindbank" 2>/dev/null || true
 	@sleep 1
-	@MB_DB_DSN="postgres://mindbank:${MB_POSTGRES_PASSWORD:-mindbank_secret}@localhost:${MB_PG_PORT:-5434}/mindbank?sslmode=disable" \
-		MB_OLLAMA_URL="http://localhost:${MB_OLLAMA_PORT:-11434}" \
-		MB_PORT=${MB_PORT:-8095} \
+	@MB_DB_DSN="postgres://mindbank:mindbank_secret@localhost:5434/mindbank?sslmode=disable" \
+		MB_OLLAMA_URL="http://localhost:11434" \
+		MB_PORT=8095 \
 		nohup ./mindbank >> /tmp/mindbank.log 2>&1 &
 	@sleep 2
-	@curl -s http://localhost:${MB_PORT:-8095}/api/v1/health
+	@curl -s http://localhost:8095/api/v1/health
 	@echo ""
-	@echo "Dashboard: http://localhost:${MB_PORT:-8095}"
+	@echo "Dashboard: http://localhost:8095"
 
-stop: ## Stop everything
+# Stop everything
+stop:
 	@pkill -f "./mindbank" 2>/dev/null && echo "API stopped" || echo "API not running"
 	@$(MAKE) db-down
 
-# === Database ===
+# === Database (Docker) ===
 
-db-up: ## Start Postgres
+db-up:
 	docker compose up -d
 	@echo "Waiting for Postgres..."
 	@sleep 3
 	docker compose ps
 
-db-down: ## Stop Postgres
+db-down:
 	docker compose down
 
-db-status: ## Show Postgres status
+db-status:
 	docker compose ps
 
-db-logs: ## Show Postgres logs
+db-logs:
 	docker compose logs --tail=50 -f
 
 # === Development ===
 
-tidy: ## Tidy Go modules
+tidy:
 	go mod tidy
 
-vet: ## Run go vet
+vet:
 	go vet ./...
 
-test: ## Run tests
+test:
 	go test ./... -v
 
-logs: ## Show API logs
+logs:
 	tail -f /tmp/mindbank.log
 
-clean: ## Remove binary and volumes
+clean:
 	rm -f mindbank
 	docker compose down -v
 
-health: ## Health check
-	@curl -s http://localhost:${MB_PORT:-8095}/api/v1/health | python3 -m json.tool 2>/dev/null || curl -s http://localhost:${MB_PORT:-8095}/api/v1/health
+# === Quick health check ===
+
+health:
+	@curl -s http://localhost:8095/api/v1/health | python3 -m json.tool 2>/dev/null || curl -s http://localhost:8095/api/v1/health

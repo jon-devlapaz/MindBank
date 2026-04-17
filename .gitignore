@@ -1,31 +1,36 @@
 # Binaries
-mindbank
 mindbank-api
 mindbank-mcp
-
-# Go
 *.exe
-*.test
-*.out
-vendor/
 
 # Environment
 .env
-*.log
-
-# Docker
-pgdata/
+*.env.local
 
 # IDE
-.idea/
 .vscode/
-*.swp
-*.swo
-*~
+.idea/
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Build artifacts
+# Logs
+*.log
 /tmp/
+
+# Docker
+docker-compose.override.yml
+
+# Data
+data/
+backups/
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Config with secrets
+*.json.bak

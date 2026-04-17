@@ -1,8 +1,7 @@
 services:
   # PostgreSQL with pgvector extension
-  postgres:
+  mindbank-postgres:
     image: pgvector/pgvector:pg16
-    container_name: mindbank-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: mindbank
