@@ -12,11 +12,11 @@
 MindBank gives your AI assistant a permanent, searchable, relationship-aware memory that persists across conversations. Instead of forgetting everything between sessions, your agent remembers decisions, configs, preferences, and project knowledge — organized as a graph, not a flat text blob.
 
 ```
-[Klixsor project] ──contains──→ [Go backend decision]
+[My Project] ──contains──→ [Go backend decision]
        │                              │
        │                         supports
        │                              ↓
-       └──relates_to──→ [PostgreSQL config] ←──depends_on── [ClickHouse analytics]
+       └──relates_to──→ [PostgreSQL config] ←──depends_on── [Redis cache]
 ```
 
 ## Why MindBank?
@@ -32,10 +32,12 @@ MindBank gives your AI assistant a permanent, searchable, relationship-aware mem
 
 ## Quick Start
 
+Prerequisites: Go 1.23+, Docker, [Ollama](https://ollama.ai)
+
 ```bash
-# Clone and start
-git clone https://github.com/mindbank/mindbank.git
-cd mindbank
+# Clone
+git clone https://github.com/spfcraze/MindBank.git
+cd MindBank
 cp .env.example .env
 make run
 
@@ -43,9 +45,109 @@ make run
 curl http://localhost:8095/api/v1/health
 ```
 
-Prerequisites: Go 1.23+, Docker, [Ollama](https://ollama.ai)
+Dashboard at http://localhost:8095.
 
-That's it. Postgres starts in Docker, API runs native. Dashboard at http://localhost:8095.
+## Install for Hermes Agent
+
+MindBank integrates directly with [Hermes](https://github.com/mempalace/hermes-agent) as a MemoryProvider plugin. This gives Hermes automatic memory — no manual calls needed.
+
+### Step 1: Install MindBank
+
+```bash
+git clone https://github.com/spfcraze/MindBank.git
+cd MindBank
+cp .env.example .env
+make run
+```
+
+Verify the API is running:
+```bash
+curl http://localhost:8095/api/v1/health
+# {"status":"ok","postgres":"connected","ollama":"connected","version":"0.1.0"}
+```
+
+### Step 2: Install the MCP Server
+
+Build the MCP binary:
+```bash
+make build
+# or specifically:
+go build -o mindbank-mcp cmd/mindbank-mcp/main.go
+```
+
+### Step 3: Configure Hermes MCP
+
+Add MindBank to your Hermes MCP config. Edit `~/.hermes/config.yaml`:
+
+```yaml
+mcpServers:
+  mindbank:
+    command: /path/to/mindbank/mindbank-mcp
+    env:
+      MB_DB_DSN: "postgres://mindbank:mindbank_secret@localhost:5434/mindbank?sslmode=disable"
+      MB_OLLAMA_URL: "http://localhost:11434"
+```
+
+Replace `/path/to/mindbank/` with your actual install path.
+
+### Step 4: Install the Memory Provider Plugin (optional, recommended)
+
+The plugin gives Hermes automatic features beyond MCP tools:
+- Injects your memories into the system prompt at session start
+- Prefetches relevant memories before each response
+- Syncs conversation turns to MindBank automatically
+- Extracts decisions and facts at session end
+
+```bash
+# Copy plugin files
+mkdir -p ~/.hermes/plugins/memory/mindbank
+cp plugins/memory/mindbank/__init__.py ~/.hermes/plugins/memory/mindbank/
+
+# Create plugin config
+cat > ~/.hermes/mindbank.json << 'EOF'
+{
+  "api_url": "http://localhost:8095/api/v1",
+  "namespace": ""
+}
+EOF
+```
+
+### Step 5: Verify
+
+Start a Hermes session:
+```bash
+hermes chat
+```
+
+Hermes will automatically:
+1. Load your MindBank memories at session start (snapshot)
+2. Search for relevant memories before each response
+3. Store important decisions and facts after each response
+
+Try asking: "what did we decide about authentication?" — if you've stored a decision node, Hermes will find it.
+
+### Namespace Auto-Detection
+
+When using the plugin, MindBank detects your project from the current directory name. For example:
+- `cd /projects/my-webapp` → namespace `my-webapp`
+- `cd /projects/api-server` → namespace `api-server`
+
+Custom mappings in `~/.hermes/mindbank-namespaces.json`:
+```json
+{"my-project-dir": "my-project"}
+```
+
+### What You Get
+
+With the MCP server alone:
+- 6 tools: `create_node`, `search`, `ask`, `snapshot`, `neighbors`, `create_edge`
+- Manual memory management — you call the tools
+
+With the plugin:
+- Automatic snapshot injection at session start
+- Automatic prefetch before each response
+- Automatic turn syncing and fact extraction
+- Seamless — memories just work
 
 ## How It Works
 
@@ -55,10 +157,10 @@ That's it. Postgres starts in Docker, API runs native. Dashboard at http://local
 curl -X POST http://localhost:8095/api/v1/nodes \
   -H 'Content-Type: application/json' \
   -d '{
-    "label": "Use JWT for Klixsor auth",
+    "label": "Use JWT for auth",
     "node_type": "decision",
     "content": "JWT with access + refresh tokens, 15min expiry",
-    "namespace": "klixsor"
+    "namespace": "my-project"
   }'
 ```
 
@@ -66,12 +168,12 @@ curl -X POST http://localhost:8095/api/v1/nodes \
 
 ```bash
 # Full-text search
-curl "http://localhost:8095/api/v1/search?q=jwt+auth&namespace=klixsor"
+curl "http://localhost:8095/api/v1/search?q=jwt+auth&namespace=my-project"
 
 # Hybrid search (full-text + AI semantic understanding)
 curl -X POST http://localhost:8095/api/v1/search/hybrid \
   -H 'Content-Type: application/json' \
-  -d '{"query": "how do we handle authentication", "namespace": "klixsor"}'
+  -d '{"query": "how do we handle authentication", "namespace": "my-project"}'
 ```
 
 ### Ask a question
@@ -79,7 +181,7 @@ curl -X POST http://localhost:8095/api/v1/search/hybrid \
 ```bash
 curl -X POST http://localhost:8095/api/v1/ask \
   -H 'Content-Type: application/json' \
-  -d '{"query": "what database are we using for Klixsor?", "max_tokens": 500}'
+  -d '{"query": "what database are we using?", "max_tokens": 500}'
 ```
 
 ### Connect memories with edges
@@ -97,7 +199,7 @@ curl -X POST http://localhost:8095/api/v1/edges \
 ### Get the morning snapshot
 
 ```bash
-curl http://localhost:8095/api/v1/snapshot?namespace=klixsor
+curl http://localhost:8095/api/v1/snapshot?namespace=my-project
 ```
 
 ## Node Types
@@ -112,10 +214,10 @@ curl http://localhost:8095/api/v1/snapshot?namespace=klixsor
 | `concept` | Abstract ideas, patterns | "Hybrid search RRF" |
 | `person` | People involved | "Team lead" |
 | `agent` | AI agents, bots | "Hermes CLI agent" |
-| `project` | Projects, services | "Klixsor TDS" |
+| `project` | Projects, services | "My App" |
 | `topic` | Discussion topics | "Authentication" |
 | `event` | Things that happened | "Deployed v1.0.253" |
-| `question` | Open questions | "What port does ClickHouse use?" |
+| `question` | Open questions | "What port does the API use?" |
 
 ## Edge Types
 
@@ -162,6 +264,8 @@ curl http://localhost:8095/api/v1/snapshot?namespace=klixsor
 └─────────────────────────────────────────┘
 ```
 
+More details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
 ### Search Strategy
 
 MindBank uses a 3-tier fallback with hybrid search:
@@ -189,13 +293,15 @@ MB_LOG_LEVEL=info                      # debug, info, warn, error
 
 ## MCP Server
 
-MindBank includes an MCP (Model Context Protocol) server for direct integration with AI agents:
+MindBank includes an MCP server for direct integration with any AI agent:
 
 ```bash
-# Build the MCP server
+# Build
 go build -o mindbank-mcp cmd/mindbank-mcp/main.go
+```
 
-# Configure in your agent's MCP settings
+Configure in your agent's MCP settings:
+```json
 {
   "mcpServers": {
     "mindbank": {
@@ -247,7 +353,7 @@ GET    /api/v1/metrics            Prometheus metrics
 cp scripts/mindbank.service ~/.config/systemd/user/
 systemctl --user enable --now mindbank
 
-# Or run with Docker Compose
+# Or with Docker Compose
 docker compose up -d
 MB_DB_DSN="..." ./mindbank
 ```
