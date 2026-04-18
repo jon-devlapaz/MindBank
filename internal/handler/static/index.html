@@ -76,6 +76,12 @@ textarea{resize:vertical;min-height:50px}
     <button class="tab" onclick="switchTab('tools')">Tools</button>
     <button class="tab" onclick="switchTab('graph')">Graph 2D</button>
     <button class="tab" onclick="switchTab('brain')">Brain 3D</button>
+    <a href="/updates" class="tab" style="text-decoration:none">Updates ↗</a>
+  </div>
+  <div class="ollama-stats" id="ollamaStats" style="display:flex;gap:10px;font-size:10px;color:#555;align-items:center">
+    <span id="ollamaQueue" title="Embedding queue">q:—</span>
+    <span id="ollamaActive" title="Active embeddings">act:—</span>
+    <span id="ollamaLatency" title="Avg latency">lat:—ms</span>
   </div>
   <div class="status" id="healthStatus">checking...</div>
 </div>
@@ -225,6 +231,23 @@ async function loadHealth(){
   const h=await api('/health');if(!h)return;
   document.getElementById('healthStatus').innerHTML=`<span class="${h.postgres==='connected'?'ok':'err'}">PG</span> | <span class="${h.ollama==='connected'?'ok':'err'}">Ollama</span> | v${h.version}`;
   document.getElementById('healthDetail').innerHTML=`Postgres: <span class="${h.postgres==='connected'?'ok':'err'}">${h.postgres}</span><br>Ollama: <span class="${h.ollama==='connected'?'ok':'err'}">${h.ollama}</span> (${h.embedding_model})<br>Version: ${h.version}`;
+}
+
+// === Ollama Stats ===
+async function loadOllamaStats(){
+  try{
+    const s=await api('/embeddings/stats');
+    if(!s)return;
+    const q=document.getElementById('ollamaQueue');
+    const a=document.getElementById('ollamaActive');
+    const l=document.getElementById('ollamaLatency');
+    q.textContent=`q:${s.queued}`;
+    a.textContent=`act:${s.active}`;
+    l.textContent=`lat:${Math.round(s.avg_latency_ms)}ms`;
+    // Color code: green if healthy, yellow if queued, red if errors
+    const color = s.queued > 3 ? '#ff8800' : s.active > 0 ? '#00ff88' : '#555';
+    q.style.color=color; a.style.color=color; l.style.color=s.avg_latency_ms > 500 ? '#ff4444' : '#555';
+  }catch(e){}
 }
 
 // === Stats ===
@@ -556,9 +579,10 @@ async function loadGraph(){
 function graphFit(){if(graphNetwork)graphNetwork.fit({animation:true})}
 
 // === Init ===
-loadHealth();loadStats().then(()=>{lastDashNodeCount=parseInt(document.getElementById('statNodes').textContent)||0});
+loadHealth();loadOllamaStats();loadStats().then(()=>{lastDashNodeCount=parseInt(document.getElementById('statNodes').textContent)||0});
 loadNodes();loadSnapshot();
 setInterval(loadHealth,30000);
+setInterval(loadOllamaStats,10000);
 setInterval(async()=>{
   const nodes=await api('/nodes?limit=1000');
   if(Array.isArray(nodes)){

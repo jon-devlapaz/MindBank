@@ -141,10 +141,16 @@ func (sh *SearchHandler) Embed(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// EmbedStats returns embedding client metrics.
+func (sh *SearchHandler) EmbedStats(w http.ResponseWriter, r *http.Request) {
+	respondJSON(w, 200, sh.embedder.GetStats())
+}
+
 // RegisterSearchRoutes adds search endpoints to the router.
 func RegisterSearchRoutes(r chi.Router, sh *SearchHandler) {
 	r.Get("/search", sh.FTS)
 	r.Post("/search/semantic", sh.Semantic)
 	r.Post("/search/hybrid", sh.Hybrid)
 	r.Post("/embeddings/generate", sh.Embed)
+	r.Get("/embeddings/stats", sh.EmbedStats)
 }

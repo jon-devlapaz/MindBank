@@ -53,11 +53,11 @@ fi
 # ---- Helper: GitHub API call ----
 gh_api() {
     local url="$1"
-    local auth_header=""
+    local extra_headers=""
     if [ -n "${GITHUB_TOKEN:-}" ]; then
-        auth_header="-H \"Authorization: Bearer ${GITHUB_TOKEN}\""
+        extra_headers="-H \"Authorization: Bearer ${GITHUB_TOKEN}\""
     fi
-    curl -sf ${auth_header} -H "Accept: application/vnd.github.v3+json" "$url"
+    curl -sf -H "Accept: application/vnd.github.v3+json" $extra_headers "$url" 2>/dev/null
 }
 
 # ---- Get local version ----
@@ -89,19 +89,36 @@ echo "  Checking GitHub for updates..."
 
 RELEASE_JSON=$(gh_api "${GITHUB_API}/releases/latest" 2>/dev/null || echo "")
 
-if [ -z "$RELEASE_JSON" ]; then
-    # Try tags if no releases
-    RELEASE_JSON=$(gh_api "${GITHUB_API}/tags" 2>/dev/null | head -c 1000 || echo "")
-fi
-
-if [ -z "$RELEASE_JSON" ]; then
-    echo "  ERROR: Could not reach GitHub API."
-    echo "  Check your internet connection or set GITHUB_TOKEN for higher rate limits."
-    exit 1
-fi
-
-# Parse release info
-REMOTE_VERSION=$(echo "$RELEASE_JSON" | python3 -c "
+if [ -z "$RELEASE_JSON" ] || echo "$RELEASE_JSON" | grep -q '"message":"Not Found"'; then
+    # No releases — try tags
+    TAGS_JSON=$(gh_api "${GITHUB_API}/tags" 2>/dev/null || echo "")
+    if [ -z "$TAGS_JSON" ] || [ "$TAGS_JSON" = "[]" ] || echo "$TAGS_JSON" | grep -q '"message":"Not Found"'; then
+        echo ""
+        echo "  ERROR: No releases or tags found on GitHub."
+        echo "  Repository: https://github.com/${GITHUB_REPO}"
+        echo ""
+        echo "  The maintainer needs to create a release first:"
+        echo "    1. git tag v0.1.0"
+        echo "    2. git push origin v0.1.0"
+        echo "    3. gh release create v0.1.0 --title 'v0.1.0' --notes 'Initial release'"
+        exit 1
+    fi
+    # Parse first tag
+    REMOTE_VERSION=$(echo "$TAGS_JSON" | python3 -c "
+import json, sys
+try:
+    tags = json.load(sys.stdin)
+    print(tags[0]['name'].lstrip('v'))
+except:
+    print('unknown')
+" 2>/dev/null || echo "unknown")
+    RELEASE_DATE="unknown"
+    RELEASE_URL="https://github.com/${GITHUB_REPO}/releases"
+    CHANGELOG="No release notes. Check commits for changes."
+    TARBALL_URL="https://github.com/${GITHUB_REPO}/archive/refs/tags/v${REMOTE_VERSION}.tar.gz"
+else
+    # Parse release info
+    REMOTE_VERSION=$(echo "$RELEASE_JSON" | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
@@ -111,7 +128,7 @@ except:
     print('unknown')
 " 2>/dev/null || echo "unknown")
 
-RELEASE_DATE=$(echo "$RELEASE_JSON" | python3 -c "
+    RELEASE_DATE=$(echo "$RELEASE_JSON" | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
@@ -121,7 +138,7 @@ except:
     print('unknown')
 " 2>/dev/null || echo "unknown")
 
-RELEASE_URL=$(echo "$RELEASE_JSON" | python3 -c "
+    RELEASE_URL=$(echo "$RELEASE_JSON" | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
@@ -130,12 +147,11 @@ except:
     print('https://github.com/${GITHUB_REPO}/releases')
 " 2>/dev/null || echo "https://github.com/${GITHUB_REPO}/releases")
 
-CHANGELOG=$(echo "$RELEASE_JSON" | python3 -c "
+    CHANGELOG=$(echo "$RELEASE_JSON" | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
     body = d.get('body', '')
-    # Truncate to first 500 chars
     if len(body) > 500:
         body = body[:497] + '...'
     print(body)
@@ -143,7 +159,7 @@ except:
     print('No changelog available.')
 " 2>/dev/null || echo "No changelog available.")
 
-TARBALL_URL=$(echo "$RELEASE_JSON" | python3 -c "
+    TARBALL_URL=$(echo "$RELEASE_JSON" | python3 -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
@@ -151,6 +167,7 @@ try:
 except:
     print('')
 " 2>/dev/null || echo "")
+fi
 
 echo "  Remote version: ${REMOTE_VERSION} (${RELEASE_DATE})"
 echo ""
