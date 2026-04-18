@@ -199,7 +199,7 @@ func (h *UpdateHandler) RunUpdate(w http.ResponseWriter, r *http.Request) {
 
 	// Run update in background
 	go func() {
-		cmd := exec.Command("bash", scriptPath, "--yes", "--no-backup")
+		cmd := exec.Command("bash", scriptPath, "--yes", "--no-restart")
 		cmd.Dir = h.installDir
 		cmd.Env = append(os.Environ(),
 			"MINDBANK_DIR="+h.installDir,

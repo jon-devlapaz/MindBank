@@ -25,6 +25,7 @@ CHECK_ONLY=false
 PLUGIN_ONLY=false
 FORCE=false
 NO_BACKUP=false
+NO_RESTART=false
 
 # ---- Parse args ----
 for arg in "$@"; do
@@ -34,8 +35,9 @@ for arg in "$@"; do
         --force) FORCE=true ;;
         --plugin-only) PLUGIN_ONLY=true ;;
         --no-backup) NO_BACKUP=true ;;
+        --no-restart) NO_RESTART=true ;;
         --help|-h)
-            echo "Usage: bash update.sh [--check] [--yes] [--force] [--plugin-only] [--no-backup]"
+            echo "Usage: bash update.sh [--check] [--yes] [--force] [--plugin-only] [--no-backup] [--no-restart]"
             exit 0
             ;;
     esac
@@ -316,6 +318,83 @@ fi
 # ---- Update VERSION file ----
 echo "$REMOTE_VERSION" > "$MINDBANK_DIR/VERSION"
 
+# ---- Auto-restart ----
+restart_ok=false
+if [ "$NO_RESTART" = false ] && [ "$PLUGIN_ONLY" = false ]; then
+    echo ""
+    echo "  Restarting MindBank API..."
+
+    # Check if running as systemd service
+    if systemctl --user is-active mindbank &>/dev/null; then
+        echo "  Detected: systemd user service"
+        systemctl --user restart mindbank
+        sleep 2
+        if systemctl --user is-active mindbank &>/dev/null; then
+            echo "  systemd restart ✓"
+            restart_ok=true
+        else
+            echo "  ERROR: systemd restart failed. Check: journalctl --user -u mindbank"
+        fi
+    elif systemctl is-active mindbank &>/dev/null; then
+        echo "  Detected: systemd system service"
+        sudo systemctl restart mindbank
+        sleep 2
+        if systemctl is-active mindbank &>/dev/null; then
+            echo "  systemd restart ✓"
+            restart_ok=true
+        else
+            echo "  ERROR: systemd restart failed. Check: journalctl -u mindbank"
+        fi
+    else
+        # Running as standalone process — find and kill, then restart
+        PID=$(pgrep -f "mindbank-api" 2>/dev/null || pgrep -x "mindbank" 2>/dev/null || pgrep -f "./mindbank" 2>/dev/null)
+        if [ -n "$PID" ]; then
+            echo "  Found process PID: $PID"
+            kill "$PID" 2>/dev/null
+            sleep 2
+            # Force kill if still running
+            if kill -0 "$PID" 2>/dev/null; then
+                kill -9 "$PID" 2>/dev/null
+                sleep 1
+            fi
+            echo "  Stopped old process ✓"
+        fi
+
+        # Start new process
+        cd "$MINDBANK_DIR"
+        if [ -f ".env" ]; then
+            source .env
+        fi
+        export MB_DB_DSN="${MB_DB_DSN:-postgres://mindbank:mindbank_secret@localhost:5432/mindbank?sslmode=disable}"
+        export MB_OLLAMA_URL="${MB_OLLAMA_URL:-http://localhost:11434}"
+        export MB_PORT="${MB_PORT:-8095}"
+
+        nohup ./mindbank-api >> /tmp/mindbank.log 2>&1 &
+        NEW_PID=$!
+        sleep 2
+
+        # Verify it started
+        if kill -0 "$NEW_PID" 2>/dev/null; then
+            if curl -sf "http://localhost:${MB_PORT}/api/v1/health" &>/dev/null; then
+                echo "  Started PID: $NEW_PID ✓"
+                echo "  Health check: OK ✓"
+                restart_ok=true
+            else
+                echo "  WARNING: Process started but health check failed."
+                echo "  Check logs: tail /tmp/mindbank.log"
+            fi
+        else
+            echo "  ERROR: Process failed to start."
+            echo "  Check logs: tail /tmp/mindbank.log"
+        fi
+    fi
+else
+    if [ "$NO_RESTART" = true ]; then
+        echo ""
+        echo "  Auto-restart skipped (--no-restart)"
+    fi
+fi
+
 # ---- Done ----
 echo ""
 echo "══════════════════════════════════════════════"
@@ -325,6 +404,10 @@ echo ""
 if [ "$NO_BACKUP" = false ]; then
     echo "  Backup at: $BACKUP_DIR"
 fi
-echo "  Restart MindBank API to apply:"
-echo "    cd $MINDBANK_DIR && make run"
+if [ "$restart_ok" = true ]; then
+    echo "  MindBank API restarted and healthy ✓"
+elif [ "$NO_RESTART" = false ] && [ "$PLUGIN_ONLY" = false ]; then
+    echo "  Restart failed. Start manually:"
+    echo "    cd $MINDBANK_DIR && make run"
+fi
 echo ""

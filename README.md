@@ -1,34 +1,170 @@
-# MindBank — AI Memory Bank for Hermes
+# MindBank — Graph Memory for AI Agents
 
-Go + PostgreSQL mindmap memory system with semantic search, temporal versioning, and graph traversal.
+Permanent, searchable, relationship-aware memory for Claude, Hermes, and any AI agent.
 
-## Quick Start (Docker)
+## What It Does
+
+- **Hybrid search**: Full-text (PostgreSQL tsvector) + semantic (pgvector) with Reciprocal Rank Fusion
+- **Graph memory**: Nodes + edges with temporal versioning (never lose history)
+- **Local embeddings**: nomic-embed-text via Ollama (no API keys, no cloud)
+- **Per-project namespaces**: Memories auto-isolated by working directory
+- **Wake-up context**: Pre-computed snapshot of important memories on session start
+- **MCP server**: Works with Claude Desktop, Claude Code CLI, and Hermes Agent
+
+## Prerequisites
+
+- **PostgreSQL 16** with pgvector extension
+- **Go 1.23+**
+- **Ollama** (for local embeddings)
+- **Docker** (for Postgres — recommended)
+##
+Quick install script 
+Run for quick install 
+curl -sSL https://raw.githubusercontent.com/spfcraze/MindBank/main/install.sh | bash
+
+
+## Install
+
+### 1. Clone and set up
 
 ```bash
-docker compose up -d
-docker compose exec mindbank-ollama ollama pull nomic-embed-text
+git clone https://github.com/spfcraze/MindBank.git ~/mindbank
+cd ~/mindbank
+```
+
+### 2. Run setup wizard
+
+```bash
+make setup
+```
+
+Or directly:
+
+```bash
+bash scripts/setup.sh
+```
+
+This will:
+- Start Postgres via Docker (port 5434)
+- Generate secure credentials
+- Build the API server and MCP server
+- Run `install-plugin.sh` to connect your AI client
+
+### 3. Start Ollama + pull embedding model
+
+```bash
+curl -fsSL https://ollama.ai/install.sh | sh
+ollama pull nomic-embed-text
+```
+
+### 4. Start MindBank
+
+```bash
+# Load environment
+source .env
+
+# Start API server
+./mindbank-api
+```
+
+Or with Make:
+
+```bash
+make run
+```
+
+### 5. Verify
+
+```bash
 curl http://localhost:8095/api/v1/health
 ```
 
-## Native Install
+Expected:
 
-Requires: PostgreSQL 15+ with pgvector, Go 1.23+, Ollama
+```json
+{"status":"ok","postgres":"connected","ollama":"connected","version":"0.1.0"}
+```
+
+### 6. Open dashboard
+
+```
+http://localhost:8095
+```
+
+## Connect Your AI Agent
+
+The `install-plugin.sh` script detects your AI client and configures it:
 
 ```bash
-# Install pgvector
-cd /tmp && git clone --branch v0.8.2 https://github.com/pgvector/pgvector.git
-cd pgvector && make && sudo make install
+bash scripts/install-plugin.sh
+```
 
-# Install Ollama + embedding model
-curl -fsSL https://ollama.ai/install.sh | sh
-ollama pull nomic-embed-text
+Shows:
 
-# Create database
-createdb mindbank
+```
+Detected AI clients:
 
-# Build and run
-make build
-MB_DB_DSN="postgres://localhost:5432/mindbank?sslmode=disable" ./mindbank
+  MCP server: /home/user/mindbank/mindbank-mcp ✓
+
+  [1] Claude Desktop   found
+  [2] Claude Code CLI  found
+  [3] Hermes Agent     found
+
+Enter choices (e.g. 1 3 or 'all'):
+```
+
+Or use flags:
+
+```bash
+bash scripts/install-plugin.sh --claude-desktop
+bash scripts/install-plugin.sh --claude-code
+bash scripts/install-plugin.sh --hermes
+bash scripts/install-plugin.sh --all
+```
+
+### Claude Desktop
+
+Config: `~/.config/claude/claude_desktop_config.json` (Linux) or `~/Library/Application Support/Claude/` (macOS)
+
+### Claude Code CLI
+
+Config: `~/.claude/mcp.json`
+
+### Hermes Agent
+
+Plugin: `~/.hermes/hermes-agent/plugins/memory/mindbank/__init__.py`
+
+Memories auto-isolate by working directory. Edit `~/.hermes/mindbank-namespaces.json` to customize:
+
+```json
+{"my-project": "custom-ns", "other-dir": "other-ns"}
+```
+
+## Updating
+
+### From the dashboard
+
+Visit `http://localhost:8095/updates` — shows current vs latest version, one-click update.
+
+### From the command line
+
+```bash
+make update
+```
+
+Or:
+
+```bash
+bash scripts/update.sh
+```
+
+Flags:
+
+```bash
+bash scripts/update.sh --check       # check only, no changes
+bash scripts/update.sh --yes         # skip confirmation
+bash scripts/update.sh --force       # force same-version update
+bash scripts/update.sh --no-restart  # update without restarting API
 ```
 
 ## API Endpoints
@@ -63,6 +199,9 @@ MB_DB_DSN="postgres://localhost:5432/mindbank?sslmode=disable" ./mindbank
 | GET | `/api/v1/search?q=...` | Full-text search (ts_rank_cd) |
 | POST | `/api/v1/search/semantic` | Semantic search (pgvector) |
 | POST | `/api/v1/search/hybrid` | Hybrid search (FTS + vector RRF) |
+| **Embeddings** | | |
+| POST | `/api/v1/embeddings/generate` | Generate embedding |
+| GET | `/api/v1/embeddings/stats` | Embedding client metrics |
 | **Sessions** | | |
 | POST | `/api/v1/sessions` | Create session |
 | GET | `/api/v1/sessions` | List sessions (?workspace, ?active) |
@@ -74,6 +213,10 @@ MB_DB_DSN="postgres://localhost:5432/mindbank?sslmode=disable" ./mindbank
 | POST | `/api/v1/ask` | Natural language query → structured context |
 | GET | `/api/v1/snapshot` | Pre-computed wake-up context |
 | POST | `/api/v1/snapshot/rebuild` | Regenerate snapshot |
+| **Updates** | | |
+| GET | `/api/v1/updates/check` | Check GitHub for updates |
+| POST | `/api/v1/updates/run` | Run update (background) |
+| GET | `/api/v1/updates/status/{id}` | Poll update progress |
 
 ## Architecture
 
@@ -88,25 +231,44 @@ MB_DB_DSN="postgres://localhost:5432/mindbank?sslmode=disable" ./mindbank
 - **Ask API**: Natural language query → hybrid search → structured context (no LLM cost on mindbank side).
 - **Snapshots**: Pre-computed wake-up context of top-N important nodes.
 - **MCP server**: Stdio MCP protocol — 6 tools for any AI agent to query mindbank.
-- **Background embedding worker**: Async queue processor with retry (3 attempts max).
+- **Typed errors**: BUSY/UNAVAILABLE/BAD_QUERY — callers can retry or bail intelligently.
 
 ## MCP Tools (for AI agents)
 
 | Tool | Description |
 |------|-------------|
-| `mindbank_create_node` | Create a node in the mindmap |
+| `mindbank_store` | Save facts, decisions, questions, preferences |
 | `mindbank_search` | Hybrid FTS + semantic search |
 | `mindbank_ask` | Natural language question → context |
 | `mindbank_snapshot` | Get pre-computed wake-up context |
 | `mindbank_neighbors` | Get connected nodes (graph traversal) |
-| `mindbank_create_edge` | Create a connection between nodes |
 
 ## Configuration
 
 | Env Var | Default | Description |
 |---------|---------|-------------|
 | `MB_PORT` | 8095 | HTTP server port |
-| `MB_DB_DSN` | `postgres://mindbank:mindbank@localhost:5432/mindbank?sslmode=disable` | PostgreSQL DSN |
+| `MB_DB_DSN` | `postgres://mindbank:***@localhost:5432/mindbank?sslmode=disable` | PostgreSQL DSN |
 | `MB_OLLAMA_URL` | `http://localhost:11434` | Ollama API URL |
 | `MB_EMBED_MODEL` | `nomic-embed-text` | Embedding model name |
 | `MB_LOG_LEVEL` | `info` | Log level (debug/info/warn/error) |
+
+## Make Targets
+
+| Target | Description |
+|--------|-------------|
+| `make setup` | Run setup wizard (Docker + install) |
+| `make build` | Build API server |
+| `make build-mcp` | Build MCP server |
+| `make run` | Build + start Postgres + start API |
+| `make stop` | Stop API + Postgres |
+| `make update` | Check for updates and apply |
+| `make version` | Show current version |
+| `make health` | Quick health check |
+| `make test` | Run tests |
+| `make vet` | Run go vet |
+| `make clean` | Remove binaries + Docker volumes |
+
+## License
+
+MIT

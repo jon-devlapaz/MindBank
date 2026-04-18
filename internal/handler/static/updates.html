@@ -123,6 +123,11 @@ a.tab{text-decoration:none}.a.tab:hover{color:#888}
         <div class="progress-bar" id="progressBar"></div>
       </div>
       <div class="log" id="updateLog"></div>
+      <div id="restartSection" style="display:none;margin-top:12px">
+        <p style="font-size:11px;color:#888;margin-bottom:8px">Update complete. Restart the API to apply changes:</p>
+        <button class="btn btn-red" onclick="location.reload()">Reload Page</button>
+        <span style="font-size:10px;color:#444;margin-left:8px">Then run: make run</span>
+      </div>
     </div>
   </div>
 </div>
@@ -246,9 +251,12 @@ async function pollStatus(jobId) {
       const btnCheck = document.getElementById('btnCheck');
 
       if (data.status === 'success') {
-        log.innerHTML += '\n<span class="line-ok">✓ Update complete! Refresh to see changes.</span>\n';
+        log.innerHTML += '\n<span class="line-ok">✓ Update complete!</span>\n';
+        log.innerHTML += '<span class="line-ok">Restart API to apply changes.</span>\n';
         btnUpdate.textContent = 'Updated ✓';
         btnUpdate.classList.add('btn-blue');
+        // Show restart button
+        document.getElementById('restartSection').style.display = 'block';
       } else {
         log.innerHTML += '\n<span class="line-err">✗ Update failed. Check log above.</span>\n';
         btnUpdate.textContent = 'Retry';
