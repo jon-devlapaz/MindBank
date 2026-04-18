@@ -1,4 +1,4 @@
-.PHONY: build run stop db-up db-down db-status logs tidy vet clean setup
+.PHONY: build run stop db-up db-down db-status logs tidy vet clean setup install-mcp
 
 # === MindBank Commands ===
 
@@ -61,8 +61,13 @@ logs:
 	tail -f /tmp/mindbank.log
 
 clean:
-	rm -f mindbank
+	rm -f mindbank mindbank-mcp
 	docker compose down -v
+
+# === MCP Server ===
+
+build-mcp:
+	go build -o mindbank-mcp ./cmd/mindbank-mcp
 
 # === Quick health check ===
 

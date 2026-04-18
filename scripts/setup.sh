@@ -2,47 +2,71 @@
 # MindBank Complete Setup — One-command install for new users
 # Usage: curl -sSL https://raw.githubusercontent.com/.../setup.sh | bash
 # Or:    bash setup.sh
+#
+# Sets up: Postgres (Docker), API server, and calls install-plugin.sh
+# for Claude Desktop, Claude Code CLI, and/or Hermes Agent integration.
 
 set -e
 
 MINDBANK_DIR="${MINDBANK_DIR:-$HOME/mindbank}"
 MINDBANK_PORT="${MINDBANK_PORT:-8095}"
 MINDBANK_PG_PORT="${MINDBANK_PG_PORT:-5434}"
-HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 
 echo ""
 echo "╔═══════════════════════════════════════════════════╗"
-echo "║  MindBank — Graph Memory for Hermes Agent         ║"
+echo "║  MindBank — Graph Memory for AI Agents            ║"
 echo "║  Complete Setup                                   ║"
 echo "╚═══════════════════════════════════════════════════╝"
 echo ""
 
-# Step 1: Check prerequisites
+# ---- Step 1: Check prerequisites ----
 echo "[1/7] Checking prerequisites..."
 MISSING=""
 command -v docker &>/dev/null || MISSING="$MISSING docker"
 command -v curl &>/dev/null || MISSING="$MISSING curl"
-command -v hermes &>/dev/null || echo "  WARNING: hermes not found — plugin install will be skipped"
 
 if [ -n "$MISSING" ]; then
-    echo "  ERROR: Missing: $MISSING"
+    echo "  ERROR: Missing:$MISSING"
     echo "  Install Docker: https://docs.docker.com/engine/install/"
     exit 1
 fi
-echo "  OK"
 
-# Step 2: Create directory structure
+# Detect available AI clients
+HAS_CLAUDE=false
+HAS_HERMES=false
+HAS_GO=false
+command -v claude &>/dev/null && HAS_CLAUDE=true
+command -v hermes &>/dev/null && HAS_HERMES=true
+command -v go &>/dev/null && HAS_GO=true
+
+echo "  Prerequisites OK"
+echo "  Detected: docker ✓ curl ✓"
+[ "$HAS_CLAUDE" = true ] && echo "  Detected: claude ✓"
+[ "$HAS_HERMES" = true ] && echo "  Detected: hermes ✓"
+[ "$HAS_GO" = true ] && echo "  Detected: go ✓"
+
+if [ "$HAS_CLAUDE" = false ] && [ "$HAS_HERMES" = false ]; then
+    echo ""
+    echo "  WARNING: No AI client detected (claude/hermes)."
+    echo "  MindBank will be set up but not integrated."
+    echo ""
+    read -p "Continue? (y/N) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then exit 1; fi
+fi
+
+# ---- Step 2: Create directory structure ----
 echo "[2/7] Creating directory structure..."
 mkdir -p "$MINDBANK_DIR"/{migrations,scripts,internal,cmd,plugins/memory/mindbank}
 echo "  OK"
 
-# Step 3: Generate secure password
+# ---- Step 3: Generate secure credentials ----
 echo "[3/7] Generating credentials..."
 DB_PASS=$(openssl rand -hex 16 2>/dev/null || head -c 32 /dev/urandom | base64 | head -c 32)
 API_KEY=$(openssl rand -hex 32 2>/dev/null || head -c 64 /dev/urandom | base64 | head -c 64)
 echo "  Generated DB password and API key"
 
-# Step 4: Create docker-compose.yml
+# ---- Step 4: Create docker-compose.yml ----
 echo "[4/7] Creating Docker Compose config..."
 cat > "$MINDBANK_DIR/docker-compose.yml" << EOF
 version: '3.8'
@@ -69,7 +93,7 @@ volumes:
 EOF
 echo "  OK"
 
-# Step 5: Start Postgres
+# ---- Step 5: Start Postgres ----
 echo "[5/7] Starting Postgres..."
 cd "$MINDBANK_DIR"
 docker compose up -d postgres
@@ -82,7 +106,7 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-# Step 6: Create config
+# ---- Step 6: Create config ----
 echo "[6/7] Creating configuration..."
 cat > "$MINDBANK_DIR/.env" << EOF
 # MindBank Configuration
@@ -95,39 +119,47 @@ MB_API_KEY=${API_KEY}
 EOF
 echo "  OK"
 
-# Step 7: Install Hermes plugin
-echo "[7/7] Installing Hermes plugin..."
-if command -v hermes &>/dev/null; then
-    mkdir -p "$HERMES_HOME/plugins/mindbank"
+# ---- Step 7: Build MCP server + install integrations ----
+echo "[7/7] Installing AI agent integrations..."
 
-    # Find plugin source
-    PLUGIN_SRC=""
-    if [ -f "$MINDBANK_DIR/plugins/memory/mindbank/__init__.py" ]; then
-        PLUGIN_SRC="$MINDBANK_DIR/plugins/memory/mindbank/__init__.py"
-    elif [ -f "$MINDBANK_DIR/scripts/install-plugin.sh" ]; then
-        bash "$MINDBANK_DIR/scripts/install-plugin.sh" "$MINDBANK_DIR/plugins/memory/mindbank"
-        PLUGIN_SRC="installed_via_script"
-    fi
+# Build MCP binary if Go is available
+if [ "$HAS_GO" = true ] && [ -f "$MINDBANK_DIR/cmd/mindbank-mcp/main.go" ]; then
+    echo "  Building MCP server binary..."
+    cd "$MINDBANK_DIR"
+    go build -o mindbank-mcp ./cmd/mindbank-mcp
+    echo "  Built: $MINDBANK_DIR/mindbank-mcp"
+fi
 
-    if [ -n "$PLUGIN_SRC" ] && [ "$PLUGIN_SRC" != "installed_via_script" ]; then
-        cp "$PLUGIN_SRC" "$HERMES_HOME/plugins/mindbank/__init__.py"
-    fi
-
-    # Create plugin config
-    cat > "$HERMES_HOME/mindbank.json" << EOF
+# Run install-plugin.sh if it exists
+if [ -f "$MINDBANK_DIR/scripts/install-plugin.sh" ]; then
+    echo ""
+    export MINDBANK_URL="http://localhost:${MINDBANK_PORT}/api/v1"
+    export MB_DB_DSN="postgres://mindbank:${DB_PASS}@localhost:${MINDBANK_PG_PORT}/mindbank?sslmode=disable"
+    export MINDBANK_MCP_BIN="$MINDBANK_DIR/mindbank-mcp"
+    bash "$MINDBANK_DIR/scripts/install-plugin.sh" --all
+elif [ -f "$MINDBANK_DIR/plugins/memory/mindbank/__init__.py" ]; then
+    # Fallback: manual hermes install if install-plugin.sh missing
+    echo "  install-plugin.sh not found, doing manual hermes install..."
+    HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+    if command -v hermes &>/dev/null; then
+        mkdir -p "$HERMES_HOME/hermes-agent/plugins/memory/mindbank"
+        cp "$MINDBANK_DIR/plugins/memory/mindbank/__init__.py" \
+           "$HERMES_HOME/hermes-agent/plugins/memory/mindbank/__init__.py"
+        cat > "$HERMES_HOME/mindbank.json" << EOF
 {
   "api_url": "http://localhost:${MINDBANK_PORT}/api/v1",
   "namespace": ""
 }
 EOF
-
-    echo "  Plugin installed to $HERMES_HOME/plugins/mindbank/"
-    echo "  Config created at $HERMES_HOME/mindbank.json"
+        echo "  Hermes plugin installed"
+    else
+        echo "  Skipped (no install script and hermes not found)"
+    fi
 else
-    echo "  Skipped (hermes not found)"
+    echo "  Skipped (no plugin source found)"
 fi
 
-# Done!
+# ---- Done ----
 echo ""
 echo "╔═══════════════════════════════════════════════════╗"
 echo "║  Setup Complete!                                  ║"
@@ -151,7 +183,13 @@ echo ""
 echo "  API Key: ${API_KEY}"
 echo "  (Set MB_API_KEY env var to require auth)"
 echo ""
-echo "  Namespace auto-detection:"
-echo "    cd /your/project && hermes chat"
-echo "    → memories stored under 'your-project' namespace"
-echo ""
+
+if [ "$HAS_CLAUDE" = true ]; then
+    echo "  Claude: restart Claude Desktop or Claude Code to use MindBank tools."
+    echo ""
+fi
+if [ "$HAS_HERMES" = true ]; then
+    echo "  Hermes: cd /your/project && hermes chat"
+    echo "  Memories auto-isolated by working directory."
+    echo ""
+fi
