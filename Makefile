@@ -1,6 +1,10 @@
-.PHONY: build run stop db-up db-down db-status logs tidy vet clean
+.PHONY: build run stop db-up db-down db-status logs tidy vet clean setup
 
 # === MindBank Commands ===
+
+# Run setup wizard
+setup:
+	bash scripts/setup.sh
 
 # Build the binary
 build:
