@@ -114,3 +114,18 @@ docker volume ls | grep mindbank
 # If missing, your .env might point to a different compose file
 cat .env | grep DB_DSN
 ```
+
+## Migrations not running
+
+**Error:** Database tables don't exist or missing columns.
+
+```bash
+# Run migrations manually
+make migrate
+
+# Or with Docker
+docker exec -i mindbank-postgres psql -U mindbank -d mindbank < internal/db/migrations/003_nodes.sql
+
+# Check if migrations ran
+docker exec mindbank-postgres psql -U mindbank -d mindbank -c "\dt"
+```
