@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"sync"
 
 	"mindbank/internal/embedder"
 	"mindbank/internal/models"
@@ -26,6 +27,7 @@ type Server struct {
 	snapRepo    *repository.SnapshotRepo
 	sessionRepo *repository.SessionRepo
 	embedder    *embedder.Client
+	writeMu     sync.Mutex // protects stdout writes
 }
 
 // NewServer creates an MCP server.

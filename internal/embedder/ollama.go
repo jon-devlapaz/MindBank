@@ -16,6 +16,7 @@ type Client struct {
 	baseURL    string
 	model      string
 	httpClient *http.Client
+	sem        chan struct{} // semaphore to limit concurrent Ollama requests
 }
 
 // NewClient creates an Ollama embedding client.
@@ -26,6 +27,7 @@ func NewClient(baseURL, model string) *Client {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
+		sem: make(chan struct{}, 4), // max 4 concurrent embedding requests
 	}
 }
 
@@ -42,6 +44,14 @@ type embedResponse struct {
 func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	if text == "" {
 		return nil, fmt.Errorf("empty text")
+	}
+
+	// Acquire semaphore slot (blocks if 4 requests already in flight)
+	select {
+	case c.sem <- struct{}{}:
+		defer func() { <-c.sem }()
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	}
 
 	body, _ := json.Marshal(embedRequest{
