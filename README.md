@@ -20,8 +20,9 @@ Permanent, searchable, relationship-aware memory for Claude, Hermes, and any AI 
 ##
 Quick install script 
 Run for quick install 
+```bash
 curl -sSL https://raw.githubusercontent.com/spfcraze/MindBank/main/install.sh | bash
-
+```
 
 ## Install
 
