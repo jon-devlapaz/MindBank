@@ -540,8 +540,9 @@ class MindBankProvider(MemoryProvider):
 
     def _handle_search(self, args: dict) -> str:
         ns = args.get("namespace", "") or self._namespace or "hermes"
+        query = args.get("query", "")
         result = _api_call(self._api_url, "POST", "/search/hybrid", {
-            "query": args.get("query", ""),
+            "query": query,
             "namespace": ns,
             "limit": args.get("limit", 5),
         }, timeout=15)
@@ -550,7 +551,18 @@ class MindBankProvider(MemoryProvider):
             return f"Search error: {result['error']}"
 
         if not isinstance(result, list) or len(result) == 0:
-            return "No memories found."
+            # Store the unanswered question for future reference
+            try:
+                _api_call(self._api_url, "POST", "/nodes", {
+                    "label": f"Unanswered: {query[:50]}",
+                    "type": "question",
+                    "content": f"User searched for: {query}\nNo results found at this time.",
+                    "namespace": ns,
+                    "summary": "Unanswered search query",
+                }, timeout=5)
+            except Exception:
+                pass
+            return "No memories found. (Question stored for future reference)"
 
         lines = []
         for r in result:

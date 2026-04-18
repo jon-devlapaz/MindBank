@@ -6,17 +6,24 @@
 #   bash install-plugin.sh                          # auto-detect source
 #   bash install-plugin.sh /path/to/mindbank-plugin # explicit source
 #   HERMES_HOME=/custom/path bash install-plugin.sh # custom hermes home
+#
+# Environment Variables:
+#   HERMES_HOME      - Hermes home directory (default: ~/.hermes)
+#   MINDBANK_PORT    - API port (default: 8095)
+#   MINDBANK_URL     - Full API URL override
+#   MINDBANK_NS      - Default namespace override
 
 set -e
 
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
-PLUGIN_DIR="$HERMES_HOME/plugins/mindbank"
+PLUGIN_DIR="$HERMES_HOME/hermes-agent/plugins/memory/mindbank"
 MINDBANK_SRC="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MINDBANK_PORT="${MINDBANK_PORT:-8095}"
 
 echo "╔══════════════════════════════════════════╗"
 echo "║  MindBank Plugin Installer for Hermes    ║"
+echo "║  v0.1.0                                  ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
 
@@ -41,12 +48,12 @@ PLUGIN_SOURCE=""
 if [ -n "$MINDBANK_SRC" ] && [ -f "$MINDBANK_SRC/__init__.py" ]; then
     PLUGIN_SOURCE="$MINDBANK_SRC/__init__.py"
     echo "  Source: explicit path"
+elif [ -f "$SCRIPT_DIR/../plugins/memory/mindbank/__init__.py" ]; then
+    PLUGIN_SOURCE="$SCRIPT_DIR/../plugins/memory/mindbank/__init__.py"
+    echo "  Source: repo plugins directory"
 elif [ -f "$SCRIPT_DIR/__init__.py" ]; then
     PLUGIN_SOURCE="$SCRIPT_DIR/__init__.py"
     echo "  Source: script directory"
-elif [ -f "$SCRIPT_DIR/../__init__.py" ]; then
-    PLUGIN_SOURCE="$(cd "$SCRIPT_DIR/.." && pwd)/__init__.py"
-    echo "  Source: parent directory"
 else
     for candidate in \
         "$HERMES_HOME"/hermes-agent/plugins/memory/mindbank/__init__.py \
@@ -84,7 +91,7 @@ if [ ! -f "$CONFIG_FILE" ]; then
     cat > "$CONFIG_FILE" << EOF
 {
   "api_url": "${MINDBANK_URL}",
-  "namespace": ""
+  "namespace": "${MINDBANK_NS:-}"
 }
 EOF
     echo "  Config: $CONFIG_FILE (created)"
@@ -92,20 +99,35 @@ else
     echo "  Config: $CONFIG_FILE (exists, not modified)"
 fi
 
+# Create namespace mappings if they don't exist
+NS_MAP="$HERMES_HOME/mindbank-namespaces.json"
+if [ ! -f "$NS_MAP" ]; then
+    cat > "$NS_MAP" << 'EOF'
+{}
+EOF
+    echo "  Namespace map: $NS_MAP (empty, add your mappings)"
+    echo "  Example: {\"my-project\": \"custom-ns\"}"
+else
+    echo "  Namespace map: $NS_MAP (exists, not modified)"
+fi
+
 echo ""
+echo "═══════════════════════════════════════════"
 echo "✓ Plugin installed to: $PLUGIN_DIR/__init__.py"
 echo "✓ Config at: $CONFIG_FILE"
+echo "✓ Namespace map: $NS_MAP"
+echo ""
+echo "Available Tools:"
+echo "  mindbank_store      - Save facts, decisions, questions, preferences"
+echo "  mindbank_search     - Hybrid FTS + vector search"
+echo "  mindbank_ask        - Ask natural language questions about memory"
+echo "  mindbank_snapshot   - Get wake-up context summary"
+echo "  mindbank_neighbors  - Explore connected memories in graph"
 echo ""
 echo "Namespace behavior:"
-echo "  The plugin auto-detects namespace from your working directory."
-echo "  Example: working in /home/alice/my-project → namespace 'my-project'"
-echo ""
-echo "  To customize directory→namespace mappings, create:"
-echo "    $HERMES_HOME/mindbank-namespaces.json"
+echo "  Auto-detects from working directory."
+echo "  Edit $NS_MAP to customize:"
 echo '    {"my-project": "custom-ns", "other-dir": "other-ns"}'
-echo ""
-echo "  Or set a fixed namespace in $CONFIG_FILE:"
-echo '    {"api_url": "...", "namespace": "myproject"}'
 echo ""
 echo "Restart hermes for changes to take effect:"
 echo "  hermes chat"
