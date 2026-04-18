@@ -15,6 +15,7 @@
 #   MINDBANK_URL       - Full API URL override
 #   MINDBANK_NS        - Default namespace override
 #   MINDBANK_MCP_BIN   - Path to mindbank-mcp binary (default: auto-detect)
+#   MB_DB_DSN          - Postgres DSN (for MCP config)
 
 set -e
 
@@ -23,6 +24,7 @@ MINDBANK_SRC="${1:-}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MINDBANK_PORT="${MINDBANK_PORT:-8095}"
 MINDBANK_URL="${MINDBANK_URL:-http://localhost:${MINDBANK_PORT}/api/v1}"
+DB_DSN="${MB_DB_DSN:-postgres://mindbank:mindbank_secret@localhost:5432/mindbank?sslmode=disable}"
 
 echo "╔══════════════════════════════════════════════════╗"
 echo "║  MindBank Installer                              ║"
@@ -56,6 +58,7 @@ if [ "$(uname)" = "Darwin" ]; then
 else
     CLAUDE_DESKTOP_CONFIG="$HOME/.config/claude/claude_desktop_config.json"
 fi
+
 if command -v claude &>/dev/null || [ -f "$CLAUDE_DESKTOP_CONFIG" ]; then
     HAS_CLAUDE_DESKTOP=true
 fi
@@ -99,11 +102,21 @@ case "${1:-}" in
         INSTALL_HERMES=true
         ;;
     *)
-        echo "Detected:"
+        echo "Detected AI clients:"
         echo ""
-        echo "  [1] Claude Desktop   $([ "$HAS_CLAUDE_DESKTOP" = true ] && echo "✓ found" || echo "  not found")"
-        echo "  [2] Claude Code CLI  $([ "$HAS_CLAUDE_CODE" = true ] && echo "✓ found" || echo "  not found")"
-        echo "  [3] Hermes Agent     $([ "$HAS_HERMES" = true ] && echo "✓ found" || echo "  not found")"
+
+        # Show MCP binary status
+        if [ -n "$MCP_BIN" ]; then
+            echo "  MCP server: $MCP_BIN ✓"
+        else
+            echo "  MCP server: NOT FOUND (Claude needs this)"
+            echo "              Build with: make build-mcp"
+        fi
+        echo ""
+
+        echo "  [1] Claude Desktop   $([ "$HAS_CLAUDE_DESKTOP" = true ] && echo "found" || echo "not found")"
+        echo "  [2] Claude Code CLI  $([ "$HAS_CLAUDE_CODE" = true ] && echo "found" || echo "not found")"
+        echo "  [3] Hermes Agent     $([ "$HAS_HERMES" = true ] && echo "found" || echo "not found")"
         echo ""
         echo "Enter choices (e.g. 1 3 or 'all'), or press Enter to skip:"
         read -p "> " CHOICES
@@ -140,20 +153,41 @@ elif [ -f "$SCRIPT_DIR/__init__.py" ]; then
     PLUGIN_SOURCE="$SCRIPT_DIR/__init__.py"
 fi
 
-# ---- Build MCP config JSON ----
-build_mcp_config() {
-    local db_dsn="${MB_DB_DSN:-postgres://mindbank:mindbank_secret@localhost:5432/mindbank?sslmode=disable}"
-    cat << EOJSON
-{
-  "command": "${MCP_BIN}",
-  "args": [],
-  "env": {
-    "MB_DB_DSN": "${db_dsn}",
-    "MB_OLLAMA_URL": "${MB_OLLAMA_URL:-http://localhost:11434}",
-    "MB_PORT": "${MINDBANK_PORT}"
-  }
+# ---- Helper: write MCP config to a file using python ----
+write_mcp_config() {
+    local target_file="$1"
+    python3 - "$target_file" "$MCP_BIN" "$DB_DSN" "$MINDBANK_PORT" << 'PYEOF'
+import json, sys, os
+
+target = sys.argv[1]
+mcp_bin = sys.argv[2]
+db_dsn = sys.argv[3]
+port = sys.argv[4]
+ollama = os.environ.get("MB_OLLAMA_URL", "http://localhost:11434")
+
+mcp_entry = {
+    "command": mcp_bin,
+    "args": [],
+    "env": {
+        "MB_DB_DSN": db_dsn,
+        "MB_OLLAMA_URL": ollama,
+        "MB_PORT": port
+    }
 }
-EOJSON
+
+if os.path.exists(target):
+    with open(target) as f:
+        cfg = json.load(f)
+else:
+    cfg = {}
+
+cfg.setdefault("mcpServers", {})["mindbank"] = mcp_entry
+
+with open(target, "w") as f:
+    json.dump(cfg, f, indent=2)
+
+print("ok")
+PYEOF
 }
 
 # =============================================
@@ -166,36 +200,17 @@ if [ "$INSTALL_CLAUDE_DESKTOP" = true ]; then
     if [ -z "$MCP_BIN" ]; then
         echo "  ERROR: mindbank-mcp binary not found."
         echo "  Build it first: make build-mcp"
-        echo "  Then set MINDBANK_MCP_BIN=/path/to/mindbank-mcp"
+        echo "  Or: go build -o mindbank-mcp ./cmd/mindbank-mcp"
         echo "  Skipped."
     else
         mkdir -p "$(dirname "$CLAUDE_DESKTOP_CONFIG")"
-
-        if [ -f "$CLAUDE_DESKTOP_CONFIG" ]; then
-            # Merge into existing config
-            if python3 -c "
-import json, sys
-with open('$CLAUDE_DESKTOP_CONFIG') as f:
-    cfg = json.load(f)
-cfg.setdefault('mcpServers', {})['mindbank'] = $(build_mcp_config | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)))')
-with open('$CLAUDE_DESKTOP_CONFIG', 'w') as f:
-    json.dump(cfg, f, indent=2)
-" 2>/dev/null; then
-                echo "  Config: $CLAUDE_DESKTOP_CONFIG (updated)"
-            else
-                echo "  ERROR: Failed to update config. Check JSON syntax."
-            fi
+        result=$(write_mcp_config "$CLAUDE_DESKTOP_CONFIG")
+        if [ "$result" = "ok" ]; then
+            echo "  Config: $CLAUDE_DESKTOP_CONFIG"
+            echo "  Installed ✓"
         else
-            cat > "$CLAUDE_DESKTOP_CONFIG" << EOF
-{
-  "mcpServers": {
-    "mindbank": $(build_mcp_config)
-  }
-}
-EOF
-            echo "  Config: $CLAUDE_DESKTOP_CONFIG (created)"
+            echo "  ERROR: Failed to write config."
         fi
-        echo "  Installed ✓"
     fi
 fi
 
@@ -213,31 +228,13 @@ if [ "$INSTALL_CLAUDE_CODE" = true ]; then
     else
         CLAUDE_CODE_CONFIG="$HOME/.claude/mcp.json"
         mkdir -p "$(dirname "$CLAUDE_CODE_CONFIG")"
-
-        if [ -f "$CLAUDE_CODE_CONFIG" ]; then
-            if python3 -c "
-import json
-with open('$CLAUDE_CODE_CONFIG') as f:
-    cfg = json.load(f)
-cfg.setdefault('mcpServers', {})['mindbank'] = $(build_mcp_config | python3 -c 'import json,sys; print(json.dumps(json.load(sys.stdin)))')
-with open('$CLAUDE_CODE_CONFIG', 'w') as f:
-    json.dump(cfg, f, indent=2)
-" 2>/dev/null; then
-                echo "  Config: $CLAUDE_CODE_CONFIG (updated)"
-            else
-                echo "  ERROR: Failed to update config."
-            fi
+        result=$(write_mcp_config "$CLAUDE_CODE_CONFIG")
+        if [ "$result" = "ok" ]; then
+            echo "  Config: $CLAUDE_CODE_CONFIG"
+            echo "  Installed ✓"
         else
-            cat > "$CLAUDE_CODE_CONFIG" << EOF
-{
-  "mcpServers": {
-    "mindbank": $(build_mcp_config)
-  }
-}
-EOF
-            echo "  Config: $CLAUDE_CODE_CONFIG (created)"
+            echo "  ERROR: Failed to write config."
         fi
-        echo "  Installed ✓"
     fi
 fi
 
@@ -276,9 +273,7 @@ EOF
         # Namespace map
         NS_MAP="$HERMES_HOME/mindbank-namespaces.json"
         if [ ! -f "$NS_MAP" ]; then
-            cat > "$NS_MAP" << 'EOF'
-{}
-EOF
+            echo "{}" > "$NS_MAP"
             echo "  Namespace map: $NS_MAP (empty, add your mappings)"
         else
             echo "  Namespace map: $NS_MAP (exists, not modified)"
@@ -294,8 +289,11 @@ echo "════════════════════════�
 echo ""
 
 if [ "$INSTALL_CLAUDE_DESKTOP" = true ] || [ "$INSTALL_CLAUDE_CODE" = true ]; then
-    echo "MCP Server (Claude):"
-    echo "  Binary: ${MCP_BIN:-NOT FOUND — build with: make build-mcp}"
+    echo "Claude MCP Server:"
+    echo "  Binary: ${MCP_BIN:-NOT FOUND}"
+    if [ -z "$MCP_BIN" ]; then
+        echo "  Build it: make build-mcp"
+    fi
     echo ""
 fi
 

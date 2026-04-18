@@ -130,13 +130,13 @@ if [ "$HAS_GO" = true ] && [ -f "$MINDBANK_DIR/cmd/mindbank-mcp/main.go" ]; then
     echo "  Built: $MINDBANK_DIR/mindbank-mcp"
 fi
 
-# Run install-plugin.sh if it exists
+# Run install-plugin.sh if it exists (shows interactive menu)
 if [ -f "$MINDBANK_DIR/scripts/install-plugin.sh" ]; then
     echo ""
     export MINDBANK_URL="http://localhost:${MINDBANK_PORT}/api/v1"
     export MB_DB_DSN="postgres://mindbank:${DB_PASS}@localhost:${MINDBANK_PG_PORT}/mindbank?sslmode=disable"
     export MINDBANK_MCP_BIN="$MINDBANK_DIR/mindbank-mcp"
-    bash "$MINDBANK_DIR/scripts/install-plugin.sh" --all
+    bash "$MINDBANK_DIR/scripts/install-plugin.sh"
 elif [ -f "$MINDBANK_DIR/plugins/memory/mindbank/__init__.py" ]; then
     # Fallback: manual hermes install if install-plugin.sh missing
     echo "  install-plugin.sh not found, doing manual hermes install..."
