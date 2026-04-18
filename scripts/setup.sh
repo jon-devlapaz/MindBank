@@ -113,7 +113,7 @@ done
 echo "[6/9] Running database migrations..."
 if command -v psql &> /dev/null; then
     # Use local psql
-    export PGPASSWORD="$DB_PASS"
+    export PGPASSWORD="${DB_PASS}"
     for migration in internal/db/migrations/*.sql; do
         if [ -f "$migration" ]; then
             filename=$(basename "$migration")
@@ -167,6 +167,93 @@ echo "[9/9] Verifying installation..."
 HEALTH=$(curl -s http://localhost:$MINDBANK_PORT/api/v1/health)
 echo "  $HEALTH"
 
+# Step 10: Configure AI Agent
+echo ""
+echo "[10/10] Configure AI Agent"
+echo "Which AI agent would you like to configure?"
+echo "  1) Hermes Agent"
+echo "  2) Claude Code"
+echo "  3) Skip (configure manually later)"
+echo ""
+read -p "Enter choice [1-3]: " AGENT_CHOICE
+
+case $AGENT_CHOICE in
+    1)
+        echo "  Configuring Hermes Agent..."
+        mkdir -p ~/.hermes
+        if [ ! -f ~/.hermes/config.yaml ]; then
+            cat > ~/.hermes/config.yaml << EOF
+mcpServers:
+  mindbank:
+    command: $(pwd)/mindbank-mcp
+    env:
+      MB_DB_DSN: "postgres://mindbank:${DB_PASS}@localhost:${MINDBANK_PG_PORT}/mindbank?sslmode=disable"
+      MB_OLLAMA_URL: "http://localhost:11434"
+EOF
+            echo "  ✓ Created ~/.hermes/config.yaml"
+        else
+            echo "  ⚠ ~/.hermes/config.yaml already exists"
+            echo "    Add this to your config:"
+            echo ""
+            echo "  mcpServers:"
+            echo "    mindbank:"
+            echo "      command: $(pwd)/mindbank-mcp"
+            echo "      env:"
+            echo "        MB_DB_DSN: \"postgres://mindbank:${DB_PASS}@localhost:${MINDBANK_PG_PORT}/mindbank?sslmode=disable\""
+            echo "        MB_OLLAMA_URL: \"http://localhost:11434\""
+        fi
+        
+        # Install plugin if hermes is available
+        if command -v hermes &>/dev/null && [ -f scripts/install-plugin.sh ]; then
+            echo ""
+            read -p "Install MindBank plugin for Hermes? (y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                bash scripts/install-plugin.sh
+            fi
+        fi
+        ;;
+    2)
+        echo "  Configuring Claude Code..."
+        mkdir -p ~/.claude
+        if [ ! -f ~/.claude/claude_desktop_config.json ]; then
+            cat > ~/.claude/claude_desktop_config.json << EOF
+{
+  "mcpServers": {
+    "mindbank": {
+      "command": "$(pwd)/mindbank-mcp",
+      "env": {
+        "MB_DB_DSN": "postgres://mindbank:${DB_PASS}@localhost:${MINDBANK_PG_PORT}/mindbank?sslmode=disable",
+        "MB_OLLAMA_URL": "http://localhost:11434"
+      }
+    }
+  }
+}
+EOF
+            echo "  ✓ Created ~/.claude/claude_desktop_config.json"
+        else
+            echo "  ⚠ ~/.claude/claude_desktop_config.json already exists"
+            echo "    Add this to your config:"
+            echo ""
+            echo '  "mcpServers": {'
+            echo '    "mindbank": {'
+            echo "      \"command\": \"$(pwd)/mindbank-mcp\","
+            echo '      "env": {'
+            echo "        \"MB_DB_DSN\": \"postgres://mindbank:${DB_PASS}@localhost:${MINDBANK_PG_PORT}/mindbank?sslmode=disable\","
+            echo '        "MB_OLLAMA_URL": "http://localhost:11434"'
+            echo '      }'
+            echo '    }'
+            echo '  }'
+        fi
+        ;;
+    3)
+        echo "  Skipping agent configuration"
+        ;;
+    *)
+        echo "  Invalid choice, skipping agent configuration"
+        ;;
+esac
+
 echo ""
 echo "╔═══════════════════════════════════════════════════╗"
 echo "║  ✅  MindBank Setup Complete!                     ║"
@@ -183,5 +270,11 @@ echo "    make logs       - View logs"
 echo "    make health     - Check health"
 echo ""
 echo "  MCP Server: ./mindbank-mcp"
-echo "  Add to Hermes config for automatic memory!"
+echo ""
+if [ "$AGENT_CHOICE" = "1" ]; then
+    echo "  Restart Hermes for changes to take effect:"
+    echo "    hermes chat"
+elif [ "$AGENT_CHOICE" = "2" ]; then
+    echo "  Restart Claude Code for changes to take effect"
+fi
 echo ""

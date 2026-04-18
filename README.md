@@ -147,11 +147,11 @@ mcpServers:
   mindbank:
     command: /path/to/mindbank/mindbank-mcp
     env:
-      MB_DB_DSN: "postgres://mindbank:mindbank_secret@localhost:5434/mindbank?sslmode=disable"
+      MB_DB_DSN: "postgres://mindbank:${MB_POSTGRES_PASSWORD:-mindbank_secret}@localhost:5434/mindbank?sslmode=disable"
       MB_OLLAMA_URL: "http://localhost:11434"
 ```
 
-Replace `/path/to/mindbank/` with your actual install path.
+Replace `/path/to/mindbank/` with your actual install path. The password should match what's in your `.env` file.
 
 ### Step 4: Install the Memory Provider Plugin (optional, recommended)
 
@@ -211,6 +211,54 @@ With the plugin:
 - Automatic prefetch before each response
 - Automatic turn syncing and fact extraction
 - Seamless — memories just work
+
+## Install for Claude Code
+
+MindBank also works with [Claude Code](https://claude.ai/code) via MCP. This gives Claude persistent memory across sessions.
+
+### Step 1: Install MindBank
+
+```bash
+git clone https://github.com/spfcraze/MindBank.git
+cd MindBank
+make setup
+```
+
+During setup, select **Claude Code** when prompted for which agent to configure.
+
+### Step 2: Manual Configuration (if not using setup script)
+
+Add MindBank to your Claude Code MCP config at `~/.claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "mindbank": {
+      "command": "/path/to/mindbank-mcp",
+      "env": {
+        "MB_DB_DSN": "postgres://mindbank:${MB_POSTGRES_PASSWORD:-mindbank_secret}@localhost:5434/mindbank?sslmode=disable",
+        "MB_OLLAMA_URL": "http://localhost:11434"
+      }
+    }
+  }
+}
+```
+
+Replace `/path/to/mindbank-mcp` with your actual path. The password should match your `.env` file.
+
+### Step 3: Restart Claude Code
+
+Restart Claude Code to load the new MCP server.
+
+### What You Get
+
+With Claude Code + MindBank:
+- 6 MCP tools: `create_node`, `search`, `ask`, `snapshot`, `neighbors`, `create_edge`
+- Claude can store decisions, facts, and preferences
+- Claude can search your memory graph across sessions
+- Persistent memory that survives conversation resets
+
+Try asking Claude: "Remember that we use Go for the backend" — it will store this as a decision node.
 
 ## How It Works
 
@@ -347,7 +395,7 @@ Copy `.env.example` to `.env` and edit:
 
 ```bash
 MB_PORT=8095                          # API port
-MB_DB_DSN=postgres://user:pass@host:5434/mindbank?sslmode=disable
+MB_DB_DSN=postgres://mindbank:${MB_POSTGRES_PASSWORD:-mindbank_secret}@localhost:5434/mindbank?sslmode=disable
 MB_OLLAMA_URL=http://localhost:11434   # Ollama for embeddings
 MB_EMBED_MODEL=nomic-embed-text        # Embedding model
 MB_API_KEY=                            # Leave empty for no auth
@@ -364,13 +412,25 @@ go build -o mindbank-mcp cmd/mindbank-mcp/main.go
 ```
 
 Configure in your agent's MCP settings:
+
+**For Hermes Agent** (`~/.hermes/config.yaml`):
+```yaml
+mcpServers:
+  mindbank:
+    command: /path/to/mindbank-mcp
+    env:
+      MB_DB_DSN: "postgres://mindbank:${MB_POSTGRES_PASSWORD:-mindbank_secret}@localhost:5434/mindbank?sslmode=disable"
+      MB_OLLAMA_URL: "http://localhost:11434"
+```
+
+**For Claude Code** (`~/.claude/claude_desktop_config.json`):
 ```json
 {
   "mcpServers": {
     "mindbank": {
       "command": "/path/to/mindbank-mcp",
       "env": {
-        "MB_DB_DSN": "postgres://mindbank:mindbank_secret@localhost:5434/mindbank?sslmode=disable",
+        "MB_DB_DSN": "postgres://mindbank:${MB_POSTGRES_PASSWORD:-mindbank_secret}@localhost:5434/mindbank?sslmode=disable",
         "MB_OLLAMA_URL": "http://localhost:11434"
       }
     }
