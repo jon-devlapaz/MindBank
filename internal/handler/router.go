@@ -209,6 +209,43 @@ func respondError(w http.ResponseWriter, status int, msg string) {
 	respondJSON(w, status, map[string]string{"error": msg})
 }
 
+// respondEmbedError maps embedder error types to proper HTTP status codes.
+//   - BUSY → 503 Service Unavailable (retry with backoff)
+//   - UNAVAILABLE → 503 Service Unavailable (retry after delay)
+//   - BAD_QUERY → 422 Unprocessable Entity (don't retry)
+//   - other → 500 Internal Server Error
+func respondEmbedError(w http.ResponseWriter, err error, context string) {
+	if embedder.IsBusy(err) {
+		slog.Warn(context, "error", err)
+		w.Header().Set("Retry-After", "2")
+		respondJSON(w, 503, map[string]string{
+			"error": "embedding service busy, retry",
+			"type":  "BUSY",
+		})
+		return
+	}
+	if embedder.IsBadQuery(err) {
+		slog.Warn(context, "error", err)
+		respondJSON(w, 422, map[string]string{
+			"error": "query cannot be embedded",
+			"type":  "BAD_QUERY",
+		})
+		return
+	}
+	if embedder.IsUnavailable(err) {
+		slog.Error(context, "error", err)
+		w.Header().Set("Retry-After", "5")
+		respondJSON(w, 503, map[string]string{
+			"error": "embedding service unavailable",
+			"type":  "UNAVAILABLE",
+		})
+		return
+	}
+	// Unknown error type
+	slog.Error(context, "error", err)
+	respondError(w, 500, "embedding failed")
+}
+
 // bindJSON decodes JSON from request body.
 func bindJSON(r *http.Request, dst any) error {
 	decoder := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<20)) // 1MB limit

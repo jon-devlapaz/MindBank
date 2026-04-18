@@ -65,8 +65,7 @@ func (h *SearchHandler) Semantic(w http.ResponseWriter, r *http.Request) {
 	// Use cached embedding
 	embedding, err := h.searchRepo.GetCachedEmbedding(r.Context(), req.Query, h.embedder.Embed)
 	if err != nil {
-		slog.Error("embed query", "error", err)
-		respondError(w, 500, "failed to generate embedding")
+		respondEmbedError(w, err, "embed query for semantic search")
 		return
 	}
 
@@ -102,8 +101,7 @@ func (h *SearchHandler) Hybrid(w http.ResponseWriter, r *http.Request) {
 	// Use cached embedding
 	embedding, err := h.searchRepo.GetCachedEmbedding(r.Context(), req.Query, h.embedder.Embed)
 	if err != nil {
-		slog.Error("embed query for hybrid", "error", err)
-		respondError(w, 500, "failed to generate embedding")
+		respondEmbedError(w, err, "embed query for hybrid search")
 		return
 	}
 

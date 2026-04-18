@@ -60,9 +60,13 @@ type embedResponse struct {
 }
 
 // Embed generates a vector embedding for the given text.
+// Returns typed EmbedError on failure:
+//   - BAD_QUERY: empty or unembeddable text
+//   - BUSY: semaphore full, context deadline
+//   - UNAVAILABLE: Ollama unreachable or error
 func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	if text == "" {
-		return nil, fmt.Errorf("empty text")
+		return nil, NewBadQueryError("empty text")
 	}
 
 	// Track queue depth
@@ -81,7 +85,7 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	case <-ctx.Done():
 		c.queuedReqs.Add(-1)
 		c.totalErrors.Add(1)
-		return nil, ctx.Err()
+		return nil, NewBusyError("context cancelled while waiting for slot")
 	}
 
 	start := time.Now()
@@ -94,32 +98,37 @@ func (c *Client) Embed(ctx context.Context, text string) ([]float32, error) {
 	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/api/embeddings", bytes.NewReader(body))
 	if err != nil {
 		c.totalErrors.Add(1)
-		return nil, fmt.Errorf("create request: %w", err)
+		return nil, NewUnavailableError("create request failed", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		c.totalErrors.Add(1)
-		return nil, fmt.Errorf("ollama request: %w", err)
+		return nil, NewUnavailableError("ollama request failed", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode == 429 || resp.StatusCode == 503 {
+		c.totalErrors.Add(1)
+		return nil, NewBusyError(fmt.Sprintf("ollama returned %d", resp.StatusCode))
+	}
 
 	if resp.StatusCode != 200 {
 		respBody, _ := io.ReadAll(resp.Body)
 		c.totalErrors.Add(1)
-		return nil, fmt.Errorf("ollama status %d: %s", resp.StatusCode, string(respBody))
+		return nil, NewUnavailableError(fmt.Sprintf("ollama status %d: %s", resp.StatusCode, string(respBody)), nil)
 	}
 
 	var result embedResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		c.totalErrors.Add(1)
-		return nil, fmt.Errorf("decode response: %w", err)
+		return nil, NewUnavailableError("decode response failed", err)
 	}
 
 	if len(result.Embedding) == 0 {
 		c.totalErrors.Add(1)
-		return nil, fmt.Errorf("empty embedding returned")
+		return nil, NewUnavailableError("empty embedding returned", nil)
 	}
 
 	// Track latency

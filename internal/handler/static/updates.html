@@ -13,6 +13,10 @@ body{font-family:'SF Mono','Fira Code','Cascadia Code',monospace;background:#080
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 .header a{margin-left:auto;font-size:12px;color:#555;text-decoration:none}
 .header a:hover{color:#00ff88}
+.tabs{display:flex;gap:0;margin-left:20px}
+.tab{padding:6px 16px;cursor:pointer;font-family:inherit;font-size:12px;color:#555;background:transparent;border:none;border-bottom:2px solid transparent;transition:all .2s}
+.tab:hover{color:#888}.tab.active{color:#00ff88;border-bottom-color:#00ff88}
+a.tab{text-decoration:none}.a.tab:hover{color:#888}
 .container{max-width:800px;margin:40px auto;padding:0 20px}
 .card{background:#0c0c12;border:1px solid #16162a;border-radius:8px;padding:20px;margin-bottom:16px}
 .card h2{font-size:13px;color:#555;text-transform:uppercase;letter-spacing:1px;margin-bottom:14px}
@@ -61,7 +65,15 @@ body{font-family:'SF Mono','Fira Code','Cascadia Code',monospace;background:#080
 <body>
 <div class="header">
   <div class="live"></div><h1>MINDBANK</h1>
-  <a href="/">← Dashboard</a>
+  <div class="tabs">
+    <a href="/" class="tab">Dashboard</a>
+    <a href="/" class="tab">Questions</a>
+    <a href="/" class="tab">Edges</a>
+    <a href="/" class="tab">Tools</a>
+    <a href="/graph-view" class="tab">Graph 2D</a>
+    <a href="/" class="tab">Brain 3D</a>
+    <a href="/updates" class="tab active">Updates</a>
+  </div>
 </div>
 
 <div class="container">
