@@ -1,4 +1,4 @@
-.PHONY: build run stop db-up db-down db-status logs tidy vet clean setup install-mcp
+.PHONY: build run stop db-up db-down db-status logs tidy vet clean setup install-mcp update version
 
 # === MindBank Commands ===
 
@@ -68,6 +68,14 @@ clean:
 
 build-mcp:
 	go build -o mindbank-mcp ./cmd/mindbank-mcp
+
+# === Version + Updates ===
+
+version:
+	@cat VERSION
+
+update:
+	bash scripts/update.sh
 
 # === Quick health check ===
 

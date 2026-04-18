@@ -1,0 +1,244 @@
+package handler
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+
+	"github.com/go-chi/chi/v5"
+)
+
+const githubRepo = "spfcraze/MindBank"
+
+// UpdateJob tracks a running update process.
+type UpdateJob struct {
+	ID      string `json:"id"`
+	Status  string `json:"status"` // running, success, error
+	Output  string `json:"output"`
+	Started string `json:"started"`
+}
+
+// UpdateHandler handles update checking and execution.
+type UpdateHandler struct {
+	mu       sync.Mutex
+	jobs     map[string]*UpdateJob
+	installDir string
+}
+
+// NewUpdateHandler creates a new update handler.
+func NewUpdateHandler() *UpdateHandler {
+	// Auto-detect install directory (parent of scripts/)
+	dir, _ := os.Getwd()
+	if filepath.Base(dir) == "scripts" {
+		dir = filepath.Dir(dir)
+	}
+	return &UpdateHandler{
+		jobs:       make(map[string]*UpdateJob),
+		installDir: dir,
+	}
+}
+
+// RegisterUpdateRoutes registers update routes.
+func RegisterUpdateRoutes(r chi.Router, h *UpdateHandler) {
+	r.Get("/updates/check", h.CheckUpdate)
+	r.Post("/updates/run", h.RunUpdate)
+	r.Get("/updates/status/{jobID}", h.GetStatus)
+}
+
+// GitHubRelease represents a GitHub release.
+type GitHubRelease struct {
+	TagName     string `json:"tag_name"`
+	Name        string `json:"name"`
+	Body        string `json:"body"`
+	PublishedAt string `json:"published_at"`
+	HTMLURL     string `json:"html_url"`
+	TarballURL  string `json:"tarball_url"`
+}
+
+// UpdateCheckResponse is the response for the check endpoint.
+type UpdateCheckResponse struct {
+	NeedsUpdate bool   `json:"needs_update"`
+	Local       string `json:"local"`
+	Remote      string `json:"remote"`
+	Date        string `json:"date"`
+	Changelog   string `json:"changelog"`
+	ReleaseURL  string `json:"release_url"`
+	InstallType string `json:"install_type"` // git or tarball
+	InstallDir  string `json:"install_dir"`
+}
+
+// getLocalVersion reads the VERSION file.
+func (h *UpdateHandler) getLocalVersion() string {
+	data, err := os.ReadFile(filepath.Join(h.installDir, "VERSION"))
+	if err != nil {
+		return "0.0.0"
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// isGitInstall checks if this is a git-based install.
+func (h *UpdateHandler) isGitInstall() bool {
+	_, err := os.Stat(filepath.Join(h.installDir, ".git"))
+	return err == nil
+}
+
+// CheckUpdate handles GET /api/v1/updates/check.
+func (h *UpdateHandler) CheckUpdate(w http.ResponseWriter, r *http.Request) {
+	// Fetch latest release from GitHub
+	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", githubRepo)
+	resp, err := http.Get(url)
+	if err != nil {
+		// Try tags endpoint as fallback
+		url = fmt.Sprintf("https://api.github.com/repos/%s/tags", githubRepo)
+		resp, err = http.Get(url)
+		if err != nil {
+			respondError(w, 502, "failed to reach GitHub API: "+err.Error())
+			return
+		}
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		respondError(w, 500, "failed to read GitHub response")
+		return
+	}
+
+	if resp.StatusCode != 200 {
+		respondError(w, 502, fmt.Sprintf("GitHub API returned %d", resp.StatusCode))
+		return
+	}
+
+	var release GitHubRelease
+
+	// Handle /releases/latest (single object) vs /tags (array)
+	var remoteVersion, releaseDate, releaseURL, tarballURL, changelog string
+	if err := json.Unmarshal(body, &release); err == nil && release.TagName != "" {
+		// Single release
+		remoteVersion = strings.TrimPrefix(release.TagName, "v")
+		if len(release.PublishedAt) >= 10 {
+			releaseDate = release.PublishedAt[:10]
+		}
+		releaseURL = release.HTMLURL
+		tarballURL = release.TarballURL
+		changelog = release.Body
+		if len(changelog) > 500 {
+			changelog = changelog[:497] + "..."
+		}
+	} else {
+		// Array of tags — take first
+		var tags []struct {
+			Name   string `json:"name"`
+			ZipURL string `json:"zipball_url"`
+		}
+		if err := json.Unmarshal(body, &tags); err == nil && len(tags) > 0 {
+			remoteVersion = strings.TrimPrefix(tags[0].Name, "v")
+			releaseDate = "unknown"
+			releaseURL = fmt.Sprintf("https://github.com/%s/releases", githubRepo)
+		} else {
+			respondError(w, 502, "could not parse GitHub response")
+			return
+		}
+	}
+
+	localVersion := h.getLocalVersion()
+	needsUpdate := localVersion != remoteVersion && remoteVersion != ""
+
+	installType := "tarball"
+	if h.isGitInstall() {
+		installType = "git"
+	}
+
+	// Cache tarball URL in a file for update.sh to use
+	if tarballURL != "" {
+		os.WriteFile(filepath.Join(h.installDir, ".update_tarball_url"), []byte(tarballURL), 0644)
+	}
+
+	respondJSON(w, 200, UpdateCheckResponse{
+		NeedsUpdate: needsUpdate,
+		Local:       localVersion,
+		Remote:      remoteVersion,
+		Date:        releaseDate,
+		Changelog:   changelog,
+		ReleaseURL:  releaseURL,
+		InstallType: installType,
+		InstallDir:  h.installDir,
+	})
+}
+
+// RunUpdate handles POST /api/v1/updates/run.
+func (h *UpdateHandler) RunUpdate(w http.ResponseWriter, r *http.Request) {
+	// Find update.sh
+	scriptPath := filepath.Join(h.installDir, "scripts", "update.sh")
+	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+		// Try downloading it
+		respondError(w, 404, "update.sh not found at "+scriptPath)
+		return
+	}
+
+	// Generate job ID
+	jobID := fmt.Sprintf("update-%d", os.Getpid())
+
+	job := &UpdateJob{
+		ID:      jobID,
+		Status:  "running",
+		Output:  "Starting update...\n",
+		Started: fmt.Sprintf("%d", os.Getpid()),
+	}
+
+	h.mu.Lock()
+	h.jobs[jobID] = job
+	h.mu.Unlock()
+
+	// Run update in background
+	go func() {
+		cmd := exec.Command("bash", scriptPath, "--yes", "--no-backup")
+		cmd.Dir = h.installDir
+		cmd.Env = append(os.Environ(),
+			"MINDBANK_DIR="+h.installDir,
+			"AUTO_YES=true",
+		)
+
+		output, err := cmd.CombinedOutput()
+
+		h.mu.Lock()
+		job.Output += string(output)
+		if err != nil {
+			job.Status = "error"
+			job.Output += "\nError: " + err.Error()
+			slog.Error("update failed", "error", err)
+		} else {
+			job.Status = "success"
+			slog.Info("update completed successfully")
+		}
+		h.mu.Unlock()
+	}()
+
+	respondJSON(w, 202, map[string]string{
+		"job_id": jobID,
+		"status": "running",
+	})
+}
+
+// GetStatus handles GET /api/v1/updates/status/{jobID}.
+func (h *UpdateHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "jobID")
+
+	h.mu.Lock()
+	job, ok := h.jobs[jobID]
+	h.mu.Unlock()
+
+	if !ok {
+		respondError(w, 404, "job not found")
+		return
+	}
+
+	respondJSON(w, 200, job)
+}

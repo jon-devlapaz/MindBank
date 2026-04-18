@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 
 	"mindbank/internal/config"
@@ -65,6 +67,7 @@ func NewRouter(pool *pgxpool.Pool, cfg config.Config) http.Handler {
 	sessH := NewSessionHandler(sessionRepo, nodeRepo, ruleBased)
 	askH := NewAskHandler(searchRepo, snapshotRepo, edgeRepo, embClient)
 	bh := NewBatchHandler(nodeRepo, edgeRepo)
+	uh := NewUpdateHandler()
 
 	// Web UI — serve index.html at root, graph.html at /graph
 	r.Get("/graph-view", func(w http.ResponseWriter, r *http.Request) {
@@ -75,6 +78,11 @@ func NewRouter(pool *pgxpool.Pool, cfg config.Config) http.Handler {
 	r.Get("/about", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
 		data, _ := staticFS.ReadFile("static/about.html")
+		w.Write(data)
+	})
+	r.Get("/updates", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		data, _ := staticFS.ReadFile("static/updates.html")
 		w.Write(data)
 	})
 	staticSub, _ := fs.Sub(staticFS, "static")
@@ -103,7 +111,7 @@ func NewRouter(pool *pgxpool.Pool, cfg config.Config) http.Handler {
 				"postgres":        "connected",
 				"ollama":          ollamaStatus,
 				"embedding_model": cfg.EmbedModel,
-				"version":         "0.1.0",
+				"version":         getLocalVersion(),
 			})
 		})
 
@@ -170,6 +178,9 @@ func NewRouter(pool *pgxpool.Pool, cfg config.Config) http.Handler {
 
 		// Batch + Export/Import + Purge
 		RegisterBatchRoutes(r, bh)
+
+		// Updates
+		RegisterUpdateRoutes(r, uh)
 	})
 
 	return r
@@ -182,6 +193,15 @@ func respondJSON(w http.ResponseWriter, status int, data any) {
 	if err := json.NewEncoder(w).Encode(data); err != nil {
 		slog.Error("failed to encode response", "error", err)
 	}
+}
+
+// getLocalVersion reads the VERSION file.
+func getLocalVersion() string {
+	data, err := os.ReadFile("VERSION")
+	if err != nil {
+		return "0.0.0"
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // respondError writes an error response.
